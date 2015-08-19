@@ -7,16 +7,17 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
+import android.hardware.usb.UsbInterface;
 import android.hardware.usb.UsbManager;
 import android.mtp.MtpDevice;
 import android.mtp.MtpObjectInfo;
 import android.os.Bundle;
 import android.support.v7.app.ActionBarActivity;
-import android.util.Log;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.util.HashMap;
+import us.pinguo.camtool.utility.Logger;
+import us.pinguo.camtool.utility.MessageDialog;
 
 
 public class MainActivity extends ActionBarActivity {
@@ -31,33 +32,40 @@ public class MainActivity extends ActionBarActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         initView();
-
-        Log.d(TAG, "onCreate");
-
-        initUSB();
-        logUSB();
-
-
-        PendingIntent mPermissionIntent = PendingIntent.getBroadcast(this, 0, new Intent(ACTION_USB_PERMISSION), 0);
-        IntentFilter filter = new IntentFilter(ACTION_USB_PERMISSION);
-        mUsbReceiver = new USBReceiver();
-        registerReceiver(mUsbReceiver, filter);
-
+        initUSBMangr();
+        registerUsbReceiver();
     }
 
-    private void initUSB() {
+    private void registerUsbReceiver() {
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
+        filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
+        mUsbReceiver = new USBReceiver();
+        registerReceiver(mUsbReceiver, filter);
+    }
+
+    private void initUSBMangr() {
         mUsbMgr = (UsbManager) getSystemService(Context.USB_SERVICE);
+    }
+
+    public UsbDevice searchDevice() {
+        UsbDevice device = null;
+        for (UsbDevice dev : mUsbMgr.getDeviceList().values()) {
+            Logger.d(TAG, "found " + dev.getDeviceName() + "," + dev.getManufacturerName() + "," + dev.getProductName() + "," + dev.getSerialNumber());
+            device = dev;
+        }
+        return device;
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        Intent intent = getIntent();
-        UsbDevice device = (UsbDevice) intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
-        if (null != device) {
-            talkWithCamera(device);
+        UsbDevice device = searchDevice();
+        if (null == device) {
+            Logger.d(TAG, "No Camera Found");
+            MessageDialog.info(this, "No Camera Found");
         } else {
-            Log.d(TAG, "onResume device = null");
+            initDevice(device);
         }
     }
 
@@ -71,85 +79,62 @@ public class MainActivity extends ActionBarActivity {
         mTextView = (TextView) findViewById(R.id.main_tv_content);
     }
 
-    private void logUSB() {
-        HashMap<String, UsbDevice> deviceHashMap = mUsbMgr.getDeviceList();
-        StringBuilder sb = new StringBuilder();
-        if (null != deviceHashMap) {
-            int size = deviceHashMap.size();
-            Log.d(TAG, "Detected " + size + " USB Cameras");
-            if (size < 1) {
-                Toast.makeText(this, "device number < 1", Toast.LENGTH_SHORT).show();
-            } else {
-                for (String key : deviceHashMap.keySet()) {
-                    UsbDevice device = deviceHashMap.get(key);
-                    Intent intent = new Intent("android.hardware.usb.action.USB_DEVICE_ATTACHED");
-                    intent.addCategory("android.hardware.usb.action.USB_DEVICE_DETACHED");
-                    PendingIntent pi = PendingIntent.getBroadcast(this, 0, intent, 0);
-                    mUsbMgr.requestPermission(device, pi);
-                    talkWithCamera(device);
-//                    break; // Just process only one camera
-                }
-            }
-
-        } else {
-            sb.append("deviceHashMap = null\n");
-        }
-
-        mTextView.setText(sb.toString());
-    }
-
     class USBReceiver extends BroadcastReceiver {
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
-            Log.d(TAG, "action = " + action);
-            if (ACTION_USB_PERMISSION.equals(action)) {
-                synchronized (this) {
-                    UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
-                    Log.d(TAG, "in receiver device=null ? " + (device == null));
-
-                    if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                        if (device != null) {
-                            //call method to set up device communication
-                        }
-                    } else {
-                        Log.d(TAG, "permission denied for device " + device);
-                    }
-                }
+//            UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+            if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
+                MessageDialog.info(MainActivity.this, "Detect Camera has removed");
             }
+        }
+    }
+
+    public void initDevice(UsbDevice device) {
+        if (null != device) {
+            talkWithCamera(device);
         }
     }
 
     private void talkWithCamera(UsbDevice device) {
         MtpDevice mtpDevice = new MtpDevice(device);
-        Log.d(TAG, "mtpDevice name:" + mtpDevice.getDeviceName());
-
-        UsbDeviceConnection conn = null;
+        UsbDeviceConnection conn;
         if (mUsbMgr.hasPermission(device)) {
             conn = mUsbMgr.openDevice(device);
+            int usbIntfCount = device.getInterfaceCount();
+            Toast.makeText(this, "usb interface count=" + usbIntfCount, Toast.LENGTH_SHORT).show();
+            UsbInterface usbInterface = device.getInterface(0);
+            conn.claimInterface(usbInterface, true);
         } else {
+            Logger.d(TAG, "has no permission");
             Intent intent = new Intent("android.hardware.usb.action.USB_DEVICE_ATTACHED");
             intent.addCategory("android.hardware.usb.action.USB_DEVICE_DETACHED");
             PendingIntent pi = PendingIntent.getBroadcast(this, 0, intent, 0);
             mUsbMgr.requestPermission(device, pi);
+            return;
         }
 
         boolean ret = mtpDevice.open(conn);
         if (!ret) {
-            Log.d(TAG, "Failed open device");
+            Logger.d(TAG, "Failed open device");
+            MessageDialog.info(this, "Failed open device");
+            return;
         }
 
         int[] storageIDs = mtpDevice.getStorageIds();
-        Log.d(TAG, "storageIDs:" + storageIDs.length);
         if (storageIDs == null || storageIDs.length < 1) {
-            Log.d(TAG, "invalid storageIds");
+            Logger.d(TAG, "invalid storageIds");
+            MessageDialog.info(this, "Failed get storageIds");
+            return;
         }
+        Logger.d(TAG, "storageIDs:" + storageIDs.length);
 
         int storageIds = storageIDs[0];
 
         int[] objHandles = mtpDevice.getObjectHandles(storageIds, 0, 0);
-        Log.d(TAG, "objHandles:" + objHandles.length);
+        Logger.d(TAG, "objHandles:" + objHandles.length);
         if (objHandles == null || objHandles.length < 1) {
-            Log.d(TAG, "invalid objHandles");
+            Logger.d(TAG, "invalid objHandles");
+            return;
         }
 
         int objHandle = objHandles[0];
@@ -158,7 +143,7 @@ public class MainActivity extends ActionBarActivity {
         depth = mtpObjectInfo.getImagePixDepth();
         width = mtpObjectInfo.getImagePixWidth();
         height = mtpObjectInfo.getImagePixHeight();
-        Log.d(TAG, "depth:" + depth + ",width:" + width + ",height:" + height);
+        Logger.d(TAG, "depth:" + depth + ",width:" + width + ",height:" + height);
     }
 
 }

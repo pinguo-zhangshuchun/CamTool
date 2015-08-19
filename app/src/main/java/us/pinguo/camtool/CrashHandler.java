@@ -1,11 +1,12 @@
 package us.pinguo.camtool;
 
 import android.content.Context;
-import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Environment;
+import android.os.Looper;
+import android.widget.Toast;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -42,8 +43,7 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
         return sIntance;
     }
 
-    @Override
-    public void uncaughtException(Thread thread, Throwable throwable) {
+    private String getCrashMessage(Throwable throwable) {
         String msg = null;
         ByteArrayOutputStream baos = null;
         PrintStream printStream = null;
@@ -58,15 +58,49 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
         } catch (Exception e) {
             e.printStackTrace();
         }
-        saveCrashInfo(mContext, msg);
+        return msg;
+    }
+
+    @Override
+    public void uncaughtException(Thread thread, Throwable throwable) {
+        handleException(throwable);
+        try {
+            Thread.sleep(3 * 1000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        android.os.Process.killProcess(android.os.Process.myPid());
+        System.exit(10);
+
+        /*
         Intent intent = new Intent();
         intent.setClass(mContext, CrashActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.putExtra("msg", msg);
         mContext.startActivity(intent);
+        */
     }
 
-    public void setCrashHandler(Context context) {
+    private boolean handleException(Throwable ex) {
+        if (ex == null) {
+            return false;
+        }
+        new Thread() {
+            @Override
+            public void run() {
+                Looper.prepare();
+                Toast.makeText(mContext, "CamTool crash!", Toast.LENGTH_SHORT).show();
+                Looper.loop();
+            }
+        }.start();
+
+        String msg = getCrashMessage(ex);
+        saveCrashInfo(mContext, msg);
+        return true;
+    }
+
+    public void init(Context context) {
         mContext = context;
         Thread.setDefaultUncaughtExceptionHandler(this);
     }
@@ -76,14 +110,12 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
         PackageManager packageManager = context.getPackageManager();
         try {
             PackageInfo packageInfo = packageManager.getPackageInfo(pkgName, 0);
-
             File dir = new File(DIR);
             if (!dir.exists()) {
                 dir.mkdirs();
             }
-
             File file = new File(dir, NAME);
-            FileWriter writer = new FileWriter(file);
+            FileWriter writer = new FileWriter(file, true);
             SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd-HH:mm:ss");
             String now = format.format(new Date());
             writer.write("time:" + now + "\n");

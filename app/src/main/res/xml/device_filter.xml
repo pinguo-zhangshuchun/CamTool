@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- MITO-->
+    <!-- MITO -->
     <usb-device
         vendor-id="0bb4"
         product-id="0c02" />
 
-    <!-- HuaWei D2-2010-->
+    <!--  HuaWei D2-2010 -->
     <usb-device
         vendor-id="12d1"
         product-id="1052" />
 
-    <!-- Apple ITouch -->
+    <!--  Apple ITouch -->
     <usb-device
         vendor-id="05ac"
         product-id="12aa" />

@@ -10,7 +10,6 @@ public class CrashApplication extends Application {
     public void onCreate() {
         super.onCreate();
         CrashHandler crashHandler = CrashHandler.getInstance();
-        crashHandler.setCrashHandler(getApplicationContext());
-        Thread.setDefaultUncaughtExceptionHandler(crashHandler);
+        crashHandler.init(getApplicationContext());
     }
 }
