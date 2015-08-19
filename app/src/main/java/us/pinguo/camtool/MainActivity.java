@@ -9,12 +9,18 @@ import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbInterface;
 import android.hardware.usb.UsbManager;
+import android.mtp.MtpConstants;
 import android.mtp.MtpDevice;
 import android.mtp.MtpObjectInfo;
 import android.os.Bundle;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.Message;
 import android.support.v7.app.ActionBarActivity;
 import android.widget.TextView;
-import android.widget.Toast;
+
+import java.io.File;
+import java.util.Collection;
 
 import us.pinguo.camtool.utility.Logger;
 import us.pinguo.camtool.utility.MessageDialog;
@@ -50,7 +56,9 @@ public class MainActivity extends ActionBarActivity {
 
     public UsbDevice searchDevice() {
         UsbDevice device = null;
-        for (UsbDevice dev : mUsbMgr.getDeviceList().values()) {
+        Collection<UsbDevice> devices = mUsbMgr.getDeviceList().values();
+        Logger.d(TAG, "devices:" + devices.size());
+        for (UsbDevice dev : devices) {
             Logger.d(TAG, "found " + dev.getDeviceName());
             device = dev;
         }
@@ -96,14 +104,15 @@ public class MainActivity extends ActionBarActivity {
     }
 
     private void talkWithCamera(UsbDevice device) {
-        MtpDevice mtpDevice = new MtpDevice(device);
+        final MtpDevice mtpDevice = new MtpDevice(device);
         UsbDeviceConnection conn;
         if (mUsbMgr.hasPermission(device)) {
             conn = mUsbMgr.openDevice(device);
             int usbIntfCount = device.getInterfaceCount();
-            Toast.makeText(this, "usb interface count=" + usbIntfCount, Toast.LENGTH_SHORT).show();
+            Logger.d(TAG, "usb interface count:" + usbIntfCount);
             UsbInterface usbInterface = device.getInterface(0);
             conn.claimInterface(usbInterface, true);
+
         } else {
             Logger.d(TAG, "has no permission");
             Intent intent = new Intent("android.hardware.usb.action.USB_DEVICE_ATTACHED");
@@ -127,23 +136,77 @@ public class MainActivity extends ActionBarActivity {
             return;
         }
         Logger.d(TAG, "storageIDs:" + storageIDs.length);
-
-        int storageIds = storageIDs[0];
-
-        int[] objHandles = mtpDevice.getObjectHandles(storageIds, 0, 0);
+        int storageId = storageIDs[0];
+        final int[] objHandles = mtpDevice.getObjectHandles(storageId, 0, 0);
         Logger.d(TAG, "objHandles:" + objHandles.length);
         if (objHandles == null || objHandles.length < 1) {
             Logger.d(TAG, "invalid objHandles");
             return;
         }
 
-        int objHandle = objHandles[0];
-        MtpObjectInfo mtpObjectInfo = mtpDevice.getObjectInfo(objHandle);
-        int depth, width, height;
-        depth = mtpObjectInfo.getImagePixDepth();
-        width = mtpObjectInfo.getImagePixWidth();
-        height = mtpObjectInfo.getImagePixHeight();
-        Logger.d(TAG, "depth:" + depth + ",width:" + width + ",height:" + height);
+        File dir = Environment.getExternalStorageDirectory();
+        File path = new File(dir, "aaaaa");
+        if (!path.exists()) {
+            path.mkdir();
+        }
+
+
+        new Thread() {
+            @Override
+            public void run() {
+                long start = System.currentTimeMillis();
+                int counter = 0;
+                for (int handle : objHandles) {
+                    if (copyMtpObject(mtpDevice, handle)) {
+                        ++counter;
+                    }
+                }
+                long finish = System.currentTimeMillis();
+                Message msg = Message.obtain();
+                msg.what = 200;
+                msg.arg1 = counter;
+                msg.arg2 = (int) (finish - start);
+                mHandler.sendMessage(msg);
+            }
+        }.start();
     }
+
+
+    private boolean copyMtpObject(MtpDevice device, int handle) {
+        MtpObjectInfo info = device.getObjectInfo(handle);
+        if (null == info) {
+            Logger.d(TAG, "Failed get MtpObjectInfo");
+            return false;
+        }
+
+        final String path = "aaaaa";
+        int fmt = info.getFormat();
+        if (fmt == MtpConstants.FORMAT_ASSOCIATION) {
+            Logger.d(TAG, "directory:" + info.getName());
+            return false;
+        } else if (fmt == MtpConstants.FORMAT_EXIF_JPEG) {
+            Logger.d(TAG, "exif jpeg:" + info.getName());
+            return device.importFile(handle, path);
+        } else if (fmt == MtpConstants.FORMAT_PNG) {
+            Logger.d(TAG, "png:" + info.getName());
+            return device.importFile(handle, path);
+        } else if (fmt == MtpConstants.FORMAT_BMP) {
+            Logger.d(TAG, "bmp:" + info.getName());
+            return device.importFile(handle, path);
+        } else {
+            Logger.d(TAG, "Other format:" + info.getName());
+            return false;
+        }
+    }
+
+    private Handler mHandler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            if (msg.what == 200) {
+                String text = "total:" + msg.arg1 + "\n" + "cost:" + msg.arg2;
+                MessageDialog.info(MainActivity.this, text);
+            }
+        }
+    };
 
 }
