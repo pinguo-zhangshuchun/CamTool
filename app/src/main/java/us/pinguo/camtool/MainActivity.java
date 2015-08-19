@@ -51,7 +51,7 @@ public class MainActivity extends ActionBarActivity {
     public UsbDevice searchDevice() {
         UsbDevice device = null;
         for (UsbDevice dev : mUsbMgr.getDeviceList().values()) {
-            Logger.d(TAG, "found " + dev.getDeviceName() + "," + dev.getManufacturerName() + "," + dev.getProductName() + "," + dev.getSerialNumber());
+            Logger.d(TAG, "found " + dev.getDeviceName());
             device = dev;
         }
         return device;
