@@ -1,6 +1,8 @@
 package us.pinguo.camtool;
 
+import android.app.Activity;
 import android.app.PendingIntent;
+import android.app.ProgressDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -16,8 +18,6 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
-import android.support.v7.app.ActionBarActivity;
-import android.widget.TextView;
 
 import java.io.File;
 import java.util.Collection;
@@ -26,12 +26,12 @@ import us.pinguo.camtool.utility.Logger;
 import us.pinguo.camtool.utility.MessageDialog;
 
 
-public class MainActivity extends ActionBarActivity {
+public class MainActivity extends Activity {
     final static String TAG = "CamToolMainActivity";
-    private final static String ACTION_USB_PERMISSION = "us.pinguo.camtool.USB_PERMISSION";
-    private TextView mTextView;
+    final static String DEST_PATH = "aaaa";
     private USBReceiver mUsbReceiver;
     private UsbManager mUsbMgr;
+    private ProgressDialog progressDialog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -78,13 +78,19 @@ public class MainActivity extends ActionBarActivity {
     }
 
     @Override
+    protected void onPause() {
+        super.onPause();
+        progressDialog.dismiss();
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
         unregisterReceiver(mUsbReceiver);
     }
 
     private void initView() {
-        mTextView = (TextView) findViewById(R.id.main_tv_content);
+        progressDialog = new ProgressDialog(this);
     }
 
     class USBReceiver extends BroadcastReceiver {
@@ -108,8 +114,6 @@ public class MainActivity extends ActionBarActivity {
         UsbDeviceConnection conn;
         if (mUsbMgr.hasPermission(device)) {
             conn = mUsbMgr.openDevice(device);
-            int usbIntfCount = device.getInterfaceCount();
-            Logger.d(TAG, "usb interface count:" + usbIntfCount);
             UsbInterface usbInterface = device.getInterface(0);
             conn.claimInterface(usbInterface, true);
 
@@ -145,7 +149,7 @@ public class MainActivity extends ActionBarActivity {
         }
 
         File dir = Environment.getExternalStorageDirectory();
-        File path = new File(dir, "aaaaa");
+        File path = new File(dir, DEST_PATH);
         if (!path.exists()) {
             path.mkdir();
         }
@@ -159,13 +163,19 @@ public class MainActivity extends ActionBarActivity {
                 for (int handle : objHandles) {
                     if (copyMtpObject(mtpDevice, handle)) {
                         ++counter;
+                        Message msg = Message.obtain();
+                        msg.what = 100;
+                        msg.arg1 = counter;
+                        msg.arg2 = (int) (System.currentTimeMillis() - start) / 1000;
+                        msg.obj = mtpDevice.getObjectInfo(handle).getName();
+                        mHandler.sendMessage(msg);
                     }
                 }
                 long finish = System.currentTimeMillis();
                 Message msg = Message.obtain();
                 msg.what = 200;
                 msg.arg1 = counter;
-                msg.arg2 = (int) (finish - start);
+                msg.arg2 = (int) (finish - start) / 1000;
                 mHandler.sendMessage(msg);
             }
         }.start();
@@ -179,32 +189,42 @@ public class MainActivity extends ActionBarActivity {
             return false;
         }
 
-        final String path = "aaaaa";
+        String dir = new File(Environment.getExternalStorageDirectory(), DEST_PATH).getAbsolutePath();
         int fmt = info.getFormat();
+        boolean flag = false;
         if (fmt == MtpConstants.FORMAT_ASSOCIATION) {
-            Logger.d(TAG, "directory:" + info.getName());
-            return false;
+            flag = false;
         } else if (fmt == MtpConstants.FORMAT_EXIF_JPEG) {
-            Logger.d(TAG, "exif jpeg:" + info.getName());
-            return device.importFile(handle, path);
+            flag = true;
         } else if (fmt == MtpConstants.FORMAT_PNG) {
-            Logger.d(TAG, "png:" + info.getName());
-            return device.importFile(handle, path);
+            flag = true;
         } else if (fmt == MtpConstants.FORMAT_BMP) {
-            Logger.d(TAG, "bmp:" + info.getName());
-            return device.importFile(handle, path);
+            flag = true;
         } else {
-            Logger.d(TAG, "Other format:" + info.getName());
-            return false;
+            flag = false;
         }
+
+        if (flag) {
+            String path = dir + "/" + info.getName();
+            flag = device.importFile(handle, path);
+        }
+        return flag;
     }
 
     private Handler mHandler = new Handler() {
         @Override
         public void handleMessage(Message msg) {
             if (msg.what == 200) {
-                String text = "total:" + msg.arg1 + "\n" + "cost:" + msg.arg2;
+                progressDialog.dismiss();
+                String text = "total:" + msg.arg1 + "\n" + "cost:" + msg.arg2 + " s";
+                Logger.d(TAG, text);
                 MessageDialog.info(MainActivity.this, text);
+            } else if (msg.what == 100) {
+                String text = "total:" + msg.arg1 + "\n" + "cost:" + msg.arg2 + " s";
+                progressDialog.setTitle(text);
+                String title = "Copying " + msg.obj;
+                progressDialog.setMessage(title);
+                progressDialog.show();
             }
         }
     };
